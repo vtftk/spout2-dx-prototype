@@ -1,0 +1,24 @@
+[package]
+name = "vtftk-spout"
+version = "0.1.0"
+edition = "2021"
+build = "build.rs"
+
+[dependencies]
+autocxx = "0.27.1"
+cxx = "1.0"
+anyhow = "1.0.95"
+
+nalgebra = "0.33.2"
+image = "0.25.5"
+rand = "0.8.5"
+array-init = "2.1.0"
+
+[dependencies.winapi]
+version = "0.3.9"
+features = ["d3d11", "d3dcommon", "winerror", "dxgi1_2", "d3dcompiler"]
+
+[build-dependencies]
+autocxx-build = "0.27.1"
+miette = { version = "5", features = ["fancy"] }
+cc = "1.2.10"
