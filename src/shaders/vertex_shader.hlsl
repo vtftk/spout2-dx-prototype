@@ -61,7 +61,7 @@ PS_IN VSMain(VS_IN input) {
     float item_time = clamp(elapsed_time / duration, 0.0f, 1.0f);
     float yaw = YawInterpolation(spin_speed, elapsed_time);
 
-    float2 inputPosition = float2(input.pos.x, input.pos.y);
+    float2 inputPosition = input.pos.xy;
 
     // Apply yaw rotation to the input position
     float2 rotatedInputPosition = ApplyYaw(inputPosition, yaw);
@@ -78,9 +78,9 @@ PS_IN VSMain(VS_IN input) {
     float2 size = tx_size * scale;
 
     // Multiply positioning
-    float2 outputPosition = (rotatedInputPosition  + position) * size;
+    float2 outputPosition = (rotatedInputPosition * size) + position;
     
-    output.pos = float4(outputPosition.x, outputPosition.y, 0.0, 1.0);
+    output.pos = float4(outputPosition.xy, 0.0, 1.0);
    
     // output.pos =  float4(input.pos, 1.0);
     output.tex = input.tex; 

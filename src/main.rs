@@ -37,6 +37,12 @@ pub struct ThrowableRenderItem {
     pub srv: ShaderResourceView,
 }
 
+fn to_screen_space(vector: Vector2<f32>, screen_size: &Vector2<f32>) -> Vector2<f32> {
+    let relative_pos = vector.component_div(screen_size);
+
+    Vector2::new(2.0 * relative_pos.x - 1.0, 1.0 - 2.0 * relative_pos.y)
+}
+
 fn main() -> anyhow::Result<()> {
     let screen_size: Vector2<u32> = Vector2::new(1920, 1080);
 
@@ -64,36 +70,26 @@ fn main() -> anyhow::Result<()> {
 
     let screen_size_f32 = screen_size.cast::<f32>();
 
-    let end_position = Vector2::new(1920.0, 1080.0);
+    let start_position = Vector2::new(0.0, 0.0);
+    let end_position = Vector2::new(1.0, 1.0);
 
     for definition in item_definitions {
         let item_texture = Texture::load_from_path(&device, &definition.texture_path)?;
-        let start_position = Vector2::new(250.0, 250.0);
-        let scale: f32 = 5.0;
+        let scale: f32 = 1.0;
         let spin_speed = 5000.0;
         let duration = 1000.0;
 
-        let norm_texture_size = item_texture
-            .size
-            .cast::<f32>()
-            .component_div(&screen_size_f32);
+        let texture_size = item_texture.size.cast::<f32>();
 
-        let norm_start_pos = start_position
-            .cast::<f32>()
-            .component_div(&screen_size_f32)
-            .component_mul(&Vector2::new(1.0, -1.0))
-            + Vector2::new(-1.0, 1.0);
-
-        let norm_end_pos = end_position
-            .cast::<f32>()
-            .component_div(&screen_size_f32)
-            .component_mul(&Vector2::new(1.0, -1.0))
-            + Vector2::new(-1.0, 1.0);
+        // Texture size relative to the window
+        let norm_texture_size = texture_size.component_div(&screen_size_f32);
+        let start_pos = start_position.component_mul(&screen_size_f32);
+        let end_pos = end_position.component_mul(&screen_size_f32);
 
         let item_data = ItemDataBuffer {
             norm_texture_size,
-            start_position: norm_start_pos,
-            end_position: norm_end_pos,
+            start_position: to_screen_space(start_pos, &screen_size_f32),
+            end_position: to_screen_space(end_pos, &screen_size_f32),
             spin_speed,
             scale,
             duration,
@@ -193,9 +189,9 @@ fn main() -> anyhow::Result<()> {
 
         rtv.bind(&ctx);
         viewport.bind(&ctx);
-        // blend_state.bind(&ctx);
+        blend_state.bind(&ctx);
 
-        let clear_color = [1.0f32, 0.0, 0.0, 1.0];
+        let clear_color = [0.0f32, 0.0, 0.0, 0.0];
 
         loop {
             // Clear to red
