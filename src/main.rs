@@ -1,3 +1,6 @@
+use std::time::Instant;
+
+use dx::buffer::ConstantBuffer;
 use dx::buffer::IndexBuffer;
 use dx::buffer::VertexBuffer;
 use dx::device::create_device_and_context;
@@ -21,6 +24,7 @@ use winapi::um::d3dcommon::*;
 
 mod com;
 mod dx;
+mod item;
 mod spout;
 
 #[repr(C)]
@@ -44,8 +48,14 @@ pub struct Throwable {
     pub rotation: f32,
 }
 
+pub struct ThrowableRenderItem {
+    /// Shader resource view for the item texture
+    pub srv: ShaderResourceView,
+}
+
 // Constant buffer structure
 #[repr(C)]
+#[derive(Default)]
 struct ConstantBufferData {
     size: Vector2<f32>,
     position: Vector2<f32>,
@@ -55,6 +65,7 @@ struct ConstantBufferData {
 
 fn main() -> anyhow::Result<()> {
     let screen_size: Vector2<u32> = Vector2::new(1920, 1080);
+    let start_time = Instant::now();
 
     let mut sender = SpoutSender::create()?;
     sender.set_sender_name("VTFTK")?;
@@ -118,10 +129,16 @@ fn main() -> anyhow::Result<()> {
         let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
 
         // Compile shaders
-        let vertex_shader_blob =
-            ShaderBlob::compile(include_bytes!("shader.vert"), "vs_5_0", "VSMain")?;
-        let pixel_shader_blob =
-            ShaderBlob::compile(include_bytes!("shader.frag"), "ps_5_0", "PSMain")?;
+        let vertex_shader_blob = ShaderBlob::compile(
+            include_bytes!("shaders/vertex_shader.hlsl"),
+            "vs_5_0",
+            "VSMain",
+        )?;
+        let pixel_shader_blob = ShaderBlob::compile(
+            include_bytes!("shaders/fragment_shader.hlsl"),
+            "ps_5_0",
+            "PSMain",
+        )?;
 
         // Create shaders
         let vertex_shader = VertexShader::create(device.as_mut(), vertex_shader_blob.clone())?;
@@ -161,33 +178,11 @@ fn main() -> anyhow::Result<()> {
         // }
         ];
 
-        let buffer_desc = D3D11_BUFFER_DESC {
-            ByteWidth: std::mem::size_of::<ConstantBufferData>() as u32,
-            Usage: D3D11_USAGE_DYNAMIC,
-            BindFlags: D3D11_BIND_CONSTANT_BUFFER,
-            CPUAccessFlags: D3D11_CPU_ACCESS_WRITE,
-            MiscFlags: 0,
-            StructureByteStride: 0,
-        };
-
-        let mut initial_data = ConstantBufferData {
-            size: Vector2::zeros(),
-            position: Vector2::zeros(),
-            yaw: 0.0,
-            padding: [0.0f32; 3],
-        };
-
-        let init_data = D3D11_SUBRESOURCE_DATA {
-            pSysMem: &mut initial_data as *const _ as *const _,
-            SysMemPitch: 0,
-            SysMemSlicePitch: 0,
-        };
-
-        let mut constant_buffer = std::ptr::null_mut();
-        let hr = device.CreateBuffer(&buffer_desc, &init_data, &mut constant_buffer);
-        hr_bail!(hr, "failed to create constant buffer");
+        let mut constant_buffer = ConstantBuffer::<ConstantBufferData>::create_default(&device)?;
 
         loop {
+            let elapsed = start_time.elapsed().as_secs_f32();
+
             // Update throwables
             for item in &mut throwables {
                 // item.position += item.velocity;
@@ -240,35 +235,18 @@ fn main() -> anyhow::Result<()> {
                 + Vector2::new(-1.0, 1.0);
 
             // Update constant buffer
-            let cb_data = ConstantBufferData {
-                size: norm_size,
-                position: norm_pos,
-                yaw: 0.0,
-                padding: [0.0f32; 3],
-            };
-
-            // Inside the loop where you update the constant buffer:
-            let mut mapped_resource = std::mem::zeroed();
-            let hr = ctx.Map(
-                constant_buffer.cast(),
-                0,
-                D3D11_MAP_WRITE_DISCARD,
-                0,
-                &mut mapped_resource,
-            );
-
-            hr_bail!(hr, "failed to map constant buffer");
-
-            // Copy the new data into the mapped buffer
-            std::ptr::copy_nonoverlapping(
-                &cb_data as *const _ as *const _,
-                mapped_resource.pData as *mut ConstantBufferData,
-                1,
-            );
-            ctx.Unmap(constant_buffer.cast(), 0);
+            constant_buffer.replace(
+                &ctx,
+                &ConstantBufferData {
+                    size: norm_size,
+                    position: norm_pos,
+                    yaw: 0.0,
+                    padding: [0.0f32; 3],
+                },
+            )?;
+            constant_buffer.bind(&ctx);
 
             // Set constant buffer
-            ctx.VSSetConstantBuffers(0, 1, &constant_buffer);
             srv.bind(&ctx);
             ctx.DrawIndexed(6, 0, 0);
 
