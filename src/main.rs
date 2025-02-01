@@ -1,6 +1,3 @@
-use std::time::Instant;
-
-use dx::buffer::ConstantBuffer;
 use dx::buffer::IndexBuffer;
 use dx::buffer::VertexBuffer;
 use dx::device::create_device_and_context;
@@ -14,11 +11,13 @@ use dx::shader::VertexShader;
 use dx::texture::BlendState;
 use dx::texture::RenderTargetTexture;
 use dx::texture::Texture;
+use item::ItemDataBuffer;
+use item::ItemDefinition;
+use item::TimingDataBuffer;
 use nalgebra::Vector2;
 use nalgebra::Vector3;
 use spout::SpoutSender;
 use winapi::shared::dxgiformat::*;
-use winapi::shared::winerror::*;
 use winapi::um::d3d11::*;
 use winapi::um::d3dcommon::*;
 
@@ -33,39 +32,13 @@ pub struct Vertex {
     tex: Vector2<f32>,
 }
 
-pub struct Throwable {
-    /// ID of the texture used by this item
-    pub texture: Texture,
-    /// Whether to pixelate the texture
-    pub pixelate: bool,
-    /// Current position of the item
-    pub position: Vector2<f32>,
-    /// Velocity of the item
-    pub velocity: Vector2<f32>,
-    /// Scale of the item
-    pub scale: f32,
-    /// Rotation of the item
-    pub rotation: f32,
-}
-
 pub struct ThrowableRenderItem {
     /// Shader resource view for the item texture
     pub srv: ShaderResourceView,
 }
 
-// Constant buffer structure
-#[repr(C)]
-#[derive(Default)]
-struct ConstantBufferData {
-    size: Vector2<f32>,
-    position: Vector2<f32>,
-    yaw: f32,
-    padding: [f32; 3],
-}
-
 fn main() -> anyhow::Result<()> {
     let screen_size: Vector2<u32> = Vector2::new(1920, 1080);
-    let start_time = Instant::now();
 
     let mut sender = SpoutSender::create()?;
     sender.set_sender_name("VTFTK")?;
@@ -76,11 +49,70 @@ fn main() -> anyhow::Result<()> {
 
     sender.open_directx11(device.as_mut())?;
 
-    unsafe {
-        let mut item_texture = Texture::load_from_path(&device, "./assets/test1.png")?;
-        let mut srv =
-            ShaderResourceView::create_from_texture(&device, item_texture.texture.cast_as_mut())?;
+    let item_definitions = [
+        ItemDefinition {
+            texture_path: "./assets/test1.png".into(),
+            pixelate: true,
+        },
+        ItemDefinition {
+            texture_path: "./assets/test2.png".into(),
+            pixelate: true,
+        },
+    ];
 
+    let mut items = Vec::new();
+
+    let screen_size_f32 = screen_size.cast::<f32>();
+
+    let end_position = Vector2::new(1920.0, 1080.0);
+
+    for definition in item_definitions {
+        let item_texture = Texture::load_from_path(&device, &definition.texture_path)?;
+        let start_position = Vector2::new(250.0, 250.0);
+        let scale: f32 = 5.0;
+        let spin_speed = 5000.0;
+        let duration = 1000.0;
+
+        let norm_texture_size = item_texture
+            .size
+            .cast::<f32>()
+            .component_div(&screen_size_f32);
+
+        let norm_start_pos = start_position
+            .cast::<f32>()
+            .component_div(&screen_size_f32)
+            .component_mul(&Vector2::new(1.0, -1.0))
+            + Vector2::new(-1.0, 1.0);
+
+        let norm_end_pos = end_position
+            .cast::<f32>()
+            .component_div(&screen_size_f32)
+            .component_mul(&Vector2::new(1.0, -1.0))
+            + Vector2::new(-1.0, 1.0);
+
+        let item_data = ItemDataBuffer {
+            norm_texture_size,
+            start_position: norm_start_pos,
+            end_position: norm_end_pos,
+            spin_speed,
+            scale,
+            duration,
+            _padding: [0.0, 0.0, 0.0],
+        };
+
+        dbg!(&item_data);
+
+        let timing_data = TimingDataBuffer {
+            elapsed_time: 0.0,
+            _padding: [0.0, 0.0, 0.0],
+        };
+
+        let data = definition.create_render_item(&device, item_texture, item_data, timing_data)?;
+
+        items.push(data);
+    }
+
+    unsafe {
         // Create input layout
         let layout_desc = [
             D3D11_INPUT_ELEMENT_DESC {
@@ -159,99 +191,63 @@ fn main() -> anyhow::Result<()> {
         let mut linear_sampler = SamplerState::linear(&device)?;
         let mut pixelate_sampler = SamplerState::pixelate(&device)?;
 
-        let pixelate = true;
-
         rtv.bind(&ctx);
         viewport.bind(&ctx);
-        blend_state.bind(&ctx);
+        // blend_state.bind(&ctx);
 
         let clear_color = [1.0f32, 0.0, 0.0, 1.0];
 
-        let mut throwables: Vec<Throwable> = vec![
-        //  Throwable {
-        //     texture,
-        //     pixelate,
-        //     position: todo!(),
-        //     velocity: todo!(),
-        //     scale: todo!(),
-        //     rotation: todo!(),
-        // }
-        ];
-
-        let mut constant_buffer = ConstantBuffer::<ConstantBufferData>::create_default(&device)?;
-
         loop {
-            let elapsed = start_time.elapsed().as_secs_f32();
-
-            // Update throwables
-            for item in &mut throwables {
-                // item.position += item.velocity;
-
-                // Apply rotation to the throwable object (just for example purposes)
-                item.rotation += 1.0;
-                if item.rotation >= 360.0 {
-                    item.rotation = 0.0;
-                }
-            }
-
             // Clear to red
             rtv.clear(&ctx, &clear_color);
 
-            // Set the vertex shader to current
-            vertex_shader.set_shader(&ctx);
-            pixel_shader.set_shader(&ctx);
+            for item in &mut items {
+                let elapsed_time = item.start_time.elapsed().as_millis() as f32;
 
-            // Set current sampler
-            if pixelate {
-                pixelate_sampler.bind(&ctx);
-            } else {
-                linear_sampler.bind(&ctx);
+                // Update timing data
+                item.timing_data.replace(
+                    &ctx,
+                    &TimingDataBuffer {
+                        elapsed_time,
+                        _padding: [0.0, 0.0, 0.0],
+                    },
+                )?;
+
+                // Set shader resources
+                shader_input_layout.bind(&ctx);
+
+                // Set the vertex shader to current
+                vertex_shader.set_shader(&ctx);
+                pixel_shader.set_shader(&ctx);
+
+                // Set current sampler
+                if item.pixelate {
+                    pixelate_sampler.bind(&ctx);
+                } else {
+                    linear_sampler.bind(&ctx);
+                }
+
+                // Bind item data and timing data
+                let buffers = [
+                    item.item_data.buffer.as_ptr(),
+                    item.timing_data.buffer.as_ptr(),
+                ];
+                ctx.VSSetConstantBuffers(0, 2, buffers.as_ptr());
+
+                // Bind item texture
+                item.shader_resource_view.bind(&ctx);
+
+                // Bind vertex and index buffers
+                vertex_buffer.bind(&ctx);
+                index_buffer.bind(&ctx);
+
+                // Set drawing mode and draw from index buffer
+                ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+
+                ctx.DrawIndexed(6, 0, 0);
             }
 
-            // Set shader resources
-            shader_input_layout.bind(&ctx);
-
-            // Bind vertex and index buffers
-            vertex_buffer.bind(&ctx);
-            index_buffer.bind(&ctx);
-
-            // Set drawing mode and draw from index buffer
-            ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-            let screen_position = Vector2::new(250.0, 250.0);
-
-            let screen_size_f32 = screen_size.cast::<f32>();
-
-            let norm_size = item_texture
-                .size
-                .cast::<f32>()
-                .component_div(&screen_size_f32)
-                .component_mul(&Vector2::new(16.0, 16.0));
-
-            let norm_pos = screen_position
-                .cast::<f32>()
-                .component_div(&screen_size_f32)
-                .component_mul(&Vector2::new(1.0, -1.0))
-                + Vector2::new(-1.0, 1.0);
-
-            // Update constant buffer
-            constant_buffer.replace(
-                &ctx,
-                &ConstantBufferData {
-                    size: norm_size,
-                    position: norm_pos,
-                    yaw: 0.0,
-                    padding: [0.0f32; 3],
-                },
-            )?;
-            constant_buffer.bind(&ctx);
-
-            // Set constant buffer
-            srv.bind(&ctx);
-            ctx.DrawIndexed(6, 0, 0);
-
             sender.send_texture(rtv.texture.as_mut())?;
-
             sender.hold_fps(30.into())?;
         }
     }

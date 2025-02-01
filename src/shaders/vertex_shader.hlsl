@@ -1,8 +1,17 @@
-cbuffer ConstantBuffer : register(b0) {
-    float2 size;
-    float2 position;
-    float yaw; // Yaw rotation angle in radians
-};
+// Constant buffer for the initial item data (Immutable)
+cbuffer ItemDataBuffer : register (b0) {
+    float2 tx_size; 
+    float2 start_pos;
+    float2 end_pos;
+    float spin_speed;
+    float scale;
+    float duration;
+}
+
+// Constant buffer for the timing data (Dynamic)
+cbuffer TimingDataBuffer : register (b1) {
+    float elapsed_time;
+}
 
 struct VS_IN {
     float3 pos : POSITION;
@@ -14,26 +23,68 @@ struct PS_IN {
     float2 tex : TEXCOORD;
 };
 
+// Interpolate between two positions using an Arc of the provided height
+float2 ArcInterpolation(float2 start, float2 end, float t, float height)
+{
+    // Linear interpolation between start and end
+    float2 value = lerp(start, end, t);
+
+    // Calculate the arc height using a parabola
+    float arc = height * t * (1.0f - t);
+
+    // Add the arc to the linear interpolation
+    return float2(value.x, value.y + arc);
+}
+
+#define PI 3.14159265358979323846f
+
+float YawInterpolation(float spin_speed, float elapsed_time) {
+    // radians per millisecond
+    float rotationSpeed = 2.0f * PI / spin_speed; 
+    return rotationSpeed * elapsed_time;
+}
+
+// Apply yaw onto the provided input 
+float2 ApplyYaw(float2 input, float yaw) {
+    float sinYaw = sin(yaw);
+    float cosYaw = cos(yaw);
+
+    return float2(
+        input.x * cosYaw - input.y * sinYaw,
+        input.x * sinYaw + input.y * cosYaw
+    );
+}
+
 PS_IN VSMain(VS_IN input) {
     PS_IN output;
     
-    // Calculate sine and cosine of the yaw angle
-    float sinYaw = sin(yaw);
-    float cosYaw = cos(yaw);
-    
+    float item_time = clamp(elapsed_time / duration, 0.0f, 1.0f);
+    float yaw = YawInterpolation(spin_speed, elapsed_time);
+
+    float2 inputPosition = float2(input.pos.x, input.pos.y);
+
     // Apply yaw rotation to the input position
-    float2 rotatedPos;
-    rotatedPos.x = input.pos.x * cosYaw - input.pos.y * sinYaw;
-    rotatedPos.y = input.pos.x * sinYaw + input.pos.y * cosYaw;
-    
-    // Scale the rotated rectangle to the desired size and position
-    output.pos = float4(
-        rotatedPos.x * size.x + position.x,
-        rotatedPos.y * size.y + position.y,
-        0.0,
-        1.0
+    float2 rotatedInputPosition = ApplyYaw(inputPosition, yaw);
+
+    // Interpolate the current position in the throw arc
+    float2 position = ArcInterpolation(
+        start_pos,
+        end_pos,
+        item_time,
+        0.5
     );
     
-    output.tex = input.tex;
+    // Adjust normalized texture scale by the item scale
+    float2 size = tx_size * scale;
+
+    // Multiply positioning
+    float2 outputPosition = (rotatedInputPosition  + position) * size;
+    
+    output.pos = float4(outputPosition.x, outputPosition.y, 0.0, 1.0);
+   
+    // output.pos =  float4(input.pos, 1.0);
+    output.tex = input.tex; 
+
     return output;
 }
+

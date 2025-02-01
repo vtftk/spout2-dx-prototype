@@ -4,6 +4,7 @@ use winapi::{
     ctypes::c_void,
     shared::{
         dxgiformat::{DXGI_FORMAT, DXGI_FORMAT_UNKNOWN},
+        minwindef::UINT,
         winerror::FAILED,
     },
     um::d3d11::{
@@ -75,9 +76,9 @@ where
         }
     }
 
-    pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
+    pub fn bind(&mut self, ctx: &ID3D11DeviceContext, start_slot: UINT) {
         unsafe {
-            ctx.VSSetConstantBuffers(0, 1, &self.buffer.as_ptr());
+            ctx.VSSetConstantBuffers(start_slot, 1, &self.buffer.as_ptr());
         }
     }
 
@@ -206,7 +207,7 @@ impl VertexBuffer {
         }
     }
 
-    pub fn bind(&self, ctx: &ID3D11DeviceContext) {
+    pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
             let buffer = self.buffer.clone();
             ctx.IASetVertexBuffers(0, 1, &buffer.into(), &self.stride, &self.offset);
