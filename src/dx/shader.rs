@@ -1,189 +1,151 @@
-use std::ffi::CString;
-use winapi::{
-    shared::winerror::FAILED,
-    um::{
-        d3d11::{
+use anyhow::Context;
+use windows::{
+    core::PCSTR,
+    Win32::Graphics::{
+        Direct3D::{
+            Fxc::{D3DCompile, D3DCOMPILE_ENABLE_STRICTNESS},
+            ID3DBlob,
+        },
+        Direct3D11::{
             ID3D11Device, ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader,
             ID3D11Resource, ID3D11ShaderResourceView, ID3D11VertexShader, D3D11_INPUT_ELEMENT_DESC,
         },
-        d3dcommon::ID3D10Blob,
-        d3dcompiler::{D3DCompile, D3DCOMPILE_ENABLE_STRICTNESS},
     },
 };
-
-use crate::{com::ComPtr, hr_bail};
 
 /// Compiled shader blob
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct ShaderBlob(pub ComPtr<ID3D10Blob>);
+pub struct ShaderBlob(ID3DBlob);
 
 impl ShaderBlob {
-    pub fn compile(src: &[u8], target: &str, entrypoint: &str) -> anyhow::Result<ShaderBlob> {
-        let mut blob = std::ptr::null_mut();
+    pub fn compile(src: &[u8], target: PCSTR, entrypoint: PCSTR) -> anyhow::Result<ShaderBlob> {
+        let mut blob: Option<ID3DBlob> = None;
 
-        let target_c = CString::new(target)?;
-        let entrypoint_c = CString::new(entrypoint)?;
-
-        let hr = unsafe {
+        unsafe {
             D3DCompile(
                 src.as_ptr().cast(),
                 src.len(),
-                std::ptr::null(),
-                std::ptr::null(),
-                std::ptr::null_mut(),
-                entrypoint_c.as_ptr(),
-                target_c.as_ptr(),
+                None,
+                None,
+                None,
+                entrypoint,
+                target,
                 D3DCOMPILE_ENABLE_STRICTNESS,
                 0,
                 &mut blob,
-                std::ptr::null_mut(),
+                None,
             )
+            .context("failed to compile shader")?;
         };
-        if FAILED(hr) {
-            return Err(anyhow::anyhow!(
-                "failed to compile shader {target} {entrypoint}"
-            ));
-        }
 
-        Ok(ShaderBlob(blob.into()))
+        let blob = blob.context("failed to get compiled")?;
+
+        Ok(ShaderBlob(blob))
+    }
+
+    pub fn as_bytes(&self) -> &[u8] {
+        unsafe {
+            std::slice::from_raw_parts(self.0.GetBufferPointer().cast(), self.0.GetBufferSize())
+        }
     }
 }
 
 pub struct PixelShader {
-    pub blob: ShaderBlob,
-    pub shader: ComPtr<ID3D11PixelShader>,
+    pub shader: ID3D11PixelShader,
 }
 
 impl PixelShader {
-    pub fn create(device: &ID3D11Device, blob: ShaderBlob) -> anyhow::Result<PixelShader> {
-        let mut shader = std::ptr::null_mut();
-        let blob_ref = blob.0.as_ref();
-
-        let hr = unsafe {
-            device.CreatePixelShader(
-                blob_ref.GetBufferPointer(),
-                blob_ref.GetBufferSize(),
-                std::ptr::null_mut(),
-                &mut shader,
-            )
+    pub fn create(device: &ID3D11Device, shader_bytecode: &[u8]) -> anyhow::Result<PixelShader> {
+        let mut shader = None;
+        unsafe {
+            device.CreatePixelShader(shader_bytecode, None, Some(&mut shader))?;
         };
 
-        if FAILED(hr) {
-            return Err(anyhow::anyhow!("failed to create vertex shader"));
-        }
+        let shader = shader.context("failed to create vertex shader")?;
 
-        Ok(PixelShader {
-            blob,
-            shader: shader.into(),
-        })
+        Ok(PixelShader { shader })
     }
 
     pub fn set_shader(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.PSSetShader(self.shader.as_mut(), std::ptr::null_mut(), 0);
+            ctx.PSSetShader(Some(&self.shader), None);
         }
     }
 }
 
 pub struct VertexShader {
-    pub blob: ShaderBlob,
-    pub shader: ComPtr<ID3D11VertexShader>,
+    pub shader: ID3D11VertexShader,
 }
 
 impl VertexShader {
-    pub fn create(device: &ID3D11Device, blob: ShaderBlob) -> anyhow::Result<VertexShader> {
-        let mut shader = std::ptr::null_mut();
-        let blob_ref = blob.0.as_ref();
-        let hr = unsafe {
-            device.CreateVertexShader(
-                blob_ref.GetBufferPointer(),
-                blob_ref.GetBufferSize(),
-                std::ptr::null_mut(),
-                &mut shader,
-            )
-        };
+    pub fn create(device: &ID3D11Device, bytecode: &[u8]) -> anyhow::Result<VertexShader> {
+        let mut shader: Option<ID3D11VertexShader> = None;
+        unsafe { device.CreateVertexShader(bytecode, None, Some(&mut shader))? };
+        let shader = shader.context("failed to create vertex shader")?;
 
-        hr_bail!(hr, "failed to create vertex shader");
-
-        Ok(VertexShader {
-            blob,
-            shader: shader.into(),
-        })
+        Ok(VertexShader { shader })
     }
 
     pub fn set_shader(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.VSSetShader(self.shader.as_mut(), std::ptr::null_mut(), 0);
+            ctx.VSSetShader(Some(&self.shader), None);
         }
     }
 }
 
 pub struct ShaderResourceView {
-    view: ComPtr<ID3D11ShaderResourceView>,
+    view: ID3D11ShaderResourceView,
 }
 
 impl ShaderResourceView {
     pub fn create_from_texture(
         device: &ID3D11Device,
-        texture: &mut ID3D11Resource,
+        texture: &ID3D11Resource,
     ) -> anyhow::Result<ShaderResourceView> {
-        let mut srv = std::ptr::null_mut();
-        let hr = unsafe { device.CreateShaderResourceView(texture, std::ptr::null(), &mut srv) };
+        let mut view: Option<ID3D11ShaderResourceView> = None;
+        unsafe { device.CreateShaderResourceView(texture, None, Some(&mut view))? };
+        let view = view.context("failed to create shader resource view")?;
 
-        hr_bail!(hr, "failed to create shader resource view");
-
-        Ok(Self { view: srv.into() })
+        Ok(Self { view })
     }
 
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.PSSetShaderResources(0, 1, &self.view.as_ptr());
+            let view = self.view.clone();
+            ctx.PSSetShaderResources(0, Some(&[Some(view)]));
         }
     }
 
     pub fn unbind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.PSSetShaderResources(0, 1, std::ptr::null());
+            ctx.PSSetShaderResources(0, None);
         }
     }
 }
 
 pub struct ShaderInputLayout {
-    layout: ComPtr<ID3D11InputLayout>,
+    layout: ID3D11InputLayout,
 }
 
 impl ShaderInputLayout {
     pub fn create(
         device: &ID3D11Device,
         layout_desc: &[D3D11_INPUT_ELEMENT_DESC],
-        shader_blob: ShaderBlob,
+        bytecode: &[u8],
     ) -> anyhow::Result<ShaderInputLayout> {
         // Create input layout
-        let mut layout = std::ptr::null_mut();
+        let mut layout: Option<ID3D11InputLayout> = None;
 
-        let blob = shader_blob.0.as_ref();
+        unsafe { device.CreateInputLayout(layout_desc, bytecode, Some(&mut layout))? };
+        let layout = layout.context("failed to create shader input layout")?;
 
-        let hr = unsafe {
-            device.CreateInputLayout(
-                layout_desc.as_ptr(),
-                layout_desc.len() as _,
-                blob.GetBufferPointer(),
-                blob.GetBufferSize(),
-                &mut layout,
-            )
-        };
-
-        hr_bail!(hr, "failed to create shader input layout");
-
-        Ok(Self {
-            layout: layout.into(),
-        })
+        Ok(Self { layout })
     }
 
-    pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
+    pub fn bind(&self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.IASetInputLayout(self.layout.as_mut());
+            ctx.IASetInputLayout(&self.layout);
         }
     }
 }

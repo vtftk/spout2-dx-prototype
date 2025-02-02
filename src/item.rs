@@ -1,24 +1,23 @@
-use std::{path::PathBuf, time::Instant};
-
-use nalgebra::{Vector2, Vector3};
-use winapi::{
-    shared::dxgiformat::{
-        DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32_UINT,
-    },
-    um::{
-        d3d11::{
-            ID3D11Device, ID3D11DeviceContext, D3D11_INPUT_ELEMENT_DESC,
-            D3D11_INPUT_PER_VERTEX_DATA,
-        },
-        d3dcommon::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
-    },
-};
-
 use crate::dx::{
-    buffer::{ConstantBuffer, IndexBuffer, VertexBuffer},
+    buffer::{vs_set_constant_buffers, ConstantBuffer, IndexBuffer, VertexBuffer},
     sampler::SamplerState,
     shader::{PixelShader, ShaderBlob, ShaderInputLayout, ShaderResourceView, VertexShader},
     texture::Texture,
+};
+use nalgebra::{Vector2, Vector3};
+use std::{ops::Deref, path::PathBuf, time::Instant};
+use windows::{
+    core::s,
+    Win32::Graphics::{
+        Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+        Direct3D11::{
+            ID3D11Device, ID3D11DeviceContext, D3D11_INPUT_ELEMENT_DESC,
+            D3D11_INPUT_PER_VERTEX_DATA,
+        },
+        Dxgi::Common::{
+            DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32_FLOAT, DXGI_FORMAT_R32_UINT,
+        },
+    },
 };
 
 /// Definition of an item to be thrown
@@ -34,12 +33,11 @@ impl ItemDefinition {
     pub fn create_render_item(
         self,
         device: &ID3D11Device,
-        mut item_texture: Texture,
+        item_texture: Texture,
         item_data: ItemDataBuffer,
         timing_data: TimingDataBuffer,
     ) -> anyhow::Result<RenderItemDefinition> {
-        let srv =
-            ShaderResourceView::create_from_texture(device, item_texture.texture.cast_as_mut())?;
+        let srv = ShaderResourceView::create_from_texture(device, item_texture.texture.deref())?;
 
         let item_data = ConstantBuffer::create(device, item_data)?;
         let timing_data = ConstantBuffer::create(device, timing_data)?;
@@ -92,14 +90,15 @@ impl RenderItemDefinition {
 
     /// Binds the constant buffers for this item
     pub fn bind_constants(&mut self, ctx: &ID3D11DeviceContext) {
-        unsafe {
-            // Bind item data and timing data
-            let buffers = [
-                self.item_data.buffer.as_ptr(),
-                self.timing_data.buffer.as_ptr(),
-            ];
-            ctx.VSSetConstantBuffers(0, 2, buffers.as_ptr());
-        }
+        // Bind item data and timing data
+        vs_set_constant_buffers(
+            ctx,
+            0,
+            &[
+                Some(self.item_data.buffer.clone()),
+                Some(self.timing_data.buffer.clone()),
+            ],
+        );
     }
 
     pub fn render(&mut self, ctx: &ID3D11DeviceContext) {
@@ -215,25 +214,25 @@ impl ItemShader {
         // Compile shaders
         let vertex_shader_blob = ShaderBlob::compile(
             include_bytes!("shaders/vertex_shader.hlsl"),
-            "vs_5_0",
-            "VSMain",
+            s!("vs_5_0"),
+            s!("VSMain"),
         )?;
         let pixel_shader_blob = ShaderBlob::compile(
             include_bytes!("shaders/fragment_shader.hlsl"),
-            "ps_5_0",
-            "PSMain",
+            s!("ps_5_0"),
+            s!("PSMain"),
         )?;
 
         // Create shaders
-        let vertex = VertexShader::create(device, vertex_shader_blob.clone())?;
-        let pixel = PixelShader::create(device, pixel_shader_blob)?;
+        let vertex = VertexShader::create(device, vertex_shader_blob.as_bytes())?;
+        let pixel = PixelShader::create(device, pixel_shader_blob.as_bytes())?;
 
         // Create shader input layout
         let input_layout = ShaderInputLayout::create(
             device,
             &[
                 D3D11_INPUT_ELEMENT_DESC {
-                    SemanticName: "POSITION\0".as_ptr() as _,
+                    SemanticName: s!("POSITION"),
                     SemanticIndex: 0,
                     Format: DXGI_FORMAT_R32G32B32_FLOAT,
                     InputSlot: 0,
@@ -242,7 +241,7 @@ impl ItemShader {
                     InstanceDataStepRate: 0,
                 },
                 D3D11_INPUT_ELEMENT_DESC {
-                    SemanticName: "TEXCOORD\0".as_ptr() as _,
+                    SemanticName: s!("TEXCOORD"),
                     SemanticIndex: 0,
                     Format: DXGI_FORMAT_R32G32_FLOAT,
                     InputSlot: 0,
@@ -251,7 +250,7 @@ impl ItemShader {
                     InstanceDataStepRate: 0,
                 },
             ],
-            vertex_shader_blob,
+            vertex_shader_blob.as_bytes(),
         )?;
 
         Ok(ItemShader {
@@ -281,7 +280,7 @@ pub struct ItemRenderContext {
 
 impl ItemRenderContext {
     pub fn create(device: &ID3D11Device) -> anyhow::Result<Self> {
-        let item_shader = ItemShader::create(&device)?;
+        let item_shader = ItemShader::create(device)?;
         let index_buffer = create_item_index_buffer(device)?;
         let vertex_buffer = create_item_vertex_buffer(device)?;
 

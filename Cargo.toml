@@ -12,11 +12,17 @@ anyhow = "1.0.95"
 nalgebra = "0.33.2"
 image = "0.25.5"
 rand = "0.8.5"
-array-init = "2.1.0"
+vtubestudio = "0.9.0"
 
-[dependencies.winapi]
-version = "0.3.9"
-features = ["d3d11", "d3dcommon", "winerror", "dxgi1_2", "d3dcompiler"]
+[dependencies.windows]
+version = "0.59.0"
+features = [
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_Direct3D_Fxc",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Dxgi_Common",
+]
+
 
 [build-dependencies]
 autocxx-build = "0.27.1"

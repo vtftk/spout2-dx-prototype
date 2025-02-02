@@ -1,25 +1,30 @@
-use std::marker::PhantomData;
+use std::{ffi::c_void, marker::PhantomData};
 
-use winapi::{
-    ctypes::c_void,
-    shared::{
-        dxgiformat::{DXGI_FORMAT, DXGI_FORMAT_UNKNOWN},
-        minwindef::UINT,
-        winerror::FAILED,
-    },
-    um::d3d11::{
+use anyhow::Context;
+use windows::core::Interface;
+use windows::Win32::Graphics::{
+    Direct3D11::{
         ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, D3D11_BIND_CONSTANT_BUFFER,
         D3D11_BIND_INDEX_BUFFER, D3D11_BIND_VERTEX_BUFFER, D3D11_BUFFER_DESC,
         D3D11_CPU_ACCESS_WRITE, D3D11_MAP_WRITE_DISCARD, D3D11_SUBRESOURCE_DATA,
         D3D11_USAGE_DEFAULT, D3D11_USAGE_DYNAMIC,
     },
+    Dxgi::Common::{DXGI_FORMAT, DXGI_FORMAT_UNKNOWN},
 };
 
-use crate::{com::ComPtr, hr_bail};
+pub fn vs_set_constant_buffers(
+    ctx: &ID3D11DeviceContext,
+    start_slot: u32,
+    buffers: &[Option<ID3D11Buffer>],
+) {
+    unsafe {
+        ctx.VSSetConstantBuffers(start_slot, Some(buffers));
+    }
+}
 
 /// Constant buffer containing a specific type
 pub struct ConstantBuffer<T> {
-    pub buffer: ComPtr<ID3D11Buffer>,
+    pub buffer: ID3D11Buffer,
     pub _type: PhantomData<T>,
 }
 
@@ -44,8 +49,8 @@ where
         let buffer_desc = D3D11_BUFFER_DESC {
             ByteWidth: std::mem::size_of::<T>() as u32,
             Usage: D3D11_USAGE_DYNAMIC,
-            BindFlags: D3D11_BIND_CONSTANT_BUFFER,
-            CPUAccessFlags: D3D11_CPU_ACCESS_WRITE,
+            BindFlags: D3D11_BIND_CONSTANT_BUFFER.0 as u32,
+            CPUAccessFlags: D3D11_CPU_ACCESS_WRITE.0 as u32,
             MiscFlags: 0,
             StructureByteStride: 0,
         };
@@ -56,12 +61,12 @@ where
             SysMemSlicePitch: 0,
         };
 
-        let mut buffer = std::ptr::null_mut();
-        let hr = unsafe { device.CreateBuffer(&buffer_desc, &init_data, &mut buffer) };
-        hr_bail!(hr, "failed to create constant buffer");
+        let mut buffer: Option<ID3D11Buffer> = None;
+        unsafe { device.CreateBuffer(&buffer_desc, Some(&init_data), Some(&mut buffer))? };
+        let buffer = buffer.context("failed to create constant buffer")?;
 
         Ok(ConstantBuffer {
-            buffer: buffer.into(),
+            buffer,
             _type: PhantomData,
         })
     }
@@ -76,12 +81,6 @@ where
         }
     }
 
-    pub fn bind(&mut self, ctx: &ID3D11DeviceContext, start_slot: UINT) {
-        unsafe {
-            ctx.VSSetConstantBuffers(start_slot, 1, &self.buffer.as_ptr());
-        }
-    }
-
     /// Map the resource into memory and apply an action against it, un-maps the
     /// resource after the action returns
     pub unsafe fn map<F>(&mut self, ctx: &ID3D11DeviceContext, action: F) -> anyhow::Result<()>
@@ -91,16 +90,15 @@ where
         // Inside the loop where you update the constant buffer:
         let mut mapped_resource = std::mem::zeroed();
 
-        let resource = self.buffer.cast_as_mut();
+        let resource = &self.buffer;
 
-        let hr = ctx.Map(
+        ctx.Map(
             resource,
             0,
             D3D11_MAP_WRITE_DISCARD,
             0,
-            &mut mapped_resource,
-        );
-        hr_bail!(hr, "failed to map constant buffer");
+            Some(&mut mapped_resource),
+        )?;
 
         // Execute the action on the mapped data
         action(mapped_resource.pData);
@@ -112,7 +110,7 @@ where
 }
 
 pub struct IndexBuffer {
-    pub buffer: ComPtr<ID3D11Buffer>,
+    pub buffer: ID3D11Buffer,
     pub format: DXGI_FORMAT,
     pub offset: u32,
 }
@@ -139,13 +137,13 @@ impl IndexBuffer {
 
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.IASetIndexBuffer(self.buffer.as_ptr(), self.format, self.offset);
+            ctx.IASetIndexBuffer(&self.buffer, self.format, self.offset);
         }
     }
 
     pub fn unbind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.IASetIndexBuffer(std::ptr::null_mut(), DXGI_FORMAT_UNKNOWN, 0);
+            ctx.IASetIndexBuffer(None, DXGI_FORMAT_UNKNOWN, 0);
         }
     }
 
@@ -159,7 +157,7 @@ impl IndexBuffer {
         let buffer_desc = D3D11_BUFFER_DESC {
             ByteWidth: size,
             Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_INDEX_BUFFER,
+            BindFlags: D3D11_BIND_INDEX_BUFFER.0 as u32,
             CPUAccessFlags: 0,
             MiscFlags: 0,
             StructureByteStride: 0,
@@ -171,11 +169,9 @@ impl IndexBuffer {
             SysMemSlicePitch: 0,
         };
 
-        let mut buffer = std::ptr::null_mut();
-        let hr = device.CreateBuffer(&buffer_desc, &init_data, &mut buffer);
-        if FAILED(hr) {
-            return Err(anyhow::anyhow!("Failed to create vertex buffer"));
-        }
+        let mut buffer = None;
+        device.CreateBuffer(&buffer_desc, Some(&init_data), Some(&mut buffer));
+        let buffer = buffer.context("failed to create index buffer")?;
 
         Ok(Self {
             buffer: buffer.into(),
@@ -186,7 +182,7 @@ impl IndexBuffer {
 }
 
 pub struct VertexBuffer {
-    pub buffer: ComPtr<ID3D11Buffer>,
+    pub buffer: Option<ID3D11Buffer>,
     pub stride: u32,
     pub offset: u32,
 }
@@ -209,14 +205,19 @@ impl VertexBuffer {
 
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            let buffer = self.buffer.clone();
-            ctx.IASetVertexBuffers(0, 1, &buffer.into(), &self.stride, &self.offset);
+            ctx.IASetVertexBuffers(
+                0,
+                1,
+                Some(&self.buffer),
+                Some(&self.stride),
+                Some(&self.offset),
+            );
         }
     }
 
     pub fn unbind(&self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.IASetVertexBuffers(0, 0, std::ptr::null(), &0, &0);
+            ctx.IASetVertexBuffers(0, 0, None, None, None);
         }
     }
 
@@ -230,7 +231,7 @@ impl VertexBuffer {
         let buffer_desc = D3D11_BUFFER_DESC {
             ByteWidth: size,
             Usage: D3D11_USAGE_DEFAULT,
-            BindFlags: D3D11_BIND_VERTEX_BUFFER,
+            BindFlags: D3D11_BIND_VERTEX_BUFFER.0 as u32,
             CPUAccessFlags: 0,
             MiscFlags: 0,
             StructureByteStride: 0,
@@ -242,11 +243,9 @@ impl VertexBuffer {
             SysMemSlicePitch: 0,
         };
 
-        let mut buffer = std::ptr::null_mut();
-        let hr = device.CreateBuffer(&buffer_desc, &init_data, &mut buffer);
-        if FAILED(hr) {
-            return Err(anyhow::anyhow!("Failed to create vertex buffer"));
-        }
+        let mut buffer = None;
+        device.CreateBuffer(&buffer_desc, Some(&init_data), Some(&mut buffer));
+        let buffer = buffer.context("failed to create index buffer")?;
 
         Ok(VertexBuffer {
             buffer: buffer.into(),
