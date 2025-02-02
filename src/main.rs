@@ -1,36 +1,22 @@
-use dx::buffer::IndexBuffer;
-use dx::buffer::VertexBuffer;
 use dx::device::create_device_and_context;
 use dx::device::Viewport;
-use dx::sampler::SamplerState;
-use dx::shader::PixelShader;
-use dx::shader::ShaderBlob;
-use dx::shader::ShaderInputLayout;
 use dx::shader::ShaderResourceView;
-use dx::shader::VertexShader;
 use dx::texture::BlendState;
 use dx::texture::RenderTargetTexture;
 use dx::texture::Texture;
 use item::ItemDataBuffer;
 use item::ItemDefinition;
+use item::ItemRenderContext;
 use item::TimingDataBuffer;
 use nalgebra::Vector2;
-use nalgebra::Vector3;
 use spout::SpoutSender;
-use winapi::shared::dxgiformat::*;
-use winapi::um::d3d11::*;
 use winapi::um::d3dcommon::*;
 
+mod app;
 mod com;
 mod dx;
 mod item;
 mod spout;
-
-#[repr(C)]
-pub struct Vertex {
-    pos: Vector3<f32>,
-    tex: Vector2<f32>,
-}
 
 pub struct ThrowableRenderItem {
     /// Shader resource view for the item texture
@@ -96,8 +82,6 @@ fn main() -> anyhow::Result<()> {
             _padding: [0.0, 0.0, 0.0],
         };
 
-        dbg!(&item_data);
-
         let timing_data = TimingDataBuffer {
             elapsed_time: 0.0,
             _padding: [0.0, 0.0, 0.0],
@@ -109,83 +93,11 @@ fn main() -> anyhow::Result<()> {
     }
 
     unsafe {
-        // Create input layout
-        let layout_desc = [
-            D3D11_INPUT_ELEMENT_DESC {
-                SemanticName: "POSITION\0".as_ptr() as _,
-                SemanticIndex: 0,
-                Format: DXGI_FORMAT_R32G32B32_FLOAT,
-                InputSlot: 0,
-                AlignedByteOffset: 0,
-                InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                InstanceDataStepRate: 0,
-            },
-            D3D11_INPUT_ELEMENT_DESC {
-                SemanticName: "TEXCOORD\0".as_ptr() as _,
-                SemanticIndex: 0,
-                Format: DXGI_FORMAT_R32G32_FLOAT,
-                InputSlot: 0,
-                AlignedByteOffset: 12,
-                InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
-                InstanceDataStepRate: 0,
-            },
-        ];
-
-        let vertices = [
-            // Top-left
-            Vertex {
-                pos: Vector3::new(-0.5, -0.5, 0.0),
-                tex: Vector2::new(0.0, 1.0),
-            },
-            // Bottom-left
-            Vertex {
-                pos: Vector3::new(-0.5, 0.5, 0.0),
-                tex: Vector2::new(0.0, 0.0),
-            },
-            // Bottom-right
-            Vertex {
-                pos: Vector3::new(0.5, 0.5, 0.0),
-                tex: Vector2::new(1.0, 0.0),
-            },
-            // Top-right
-            Vertex {
-                pos: Vector3::new(0.5, -0.5, 0.0),
-                tex: Vector2::new(1.0, 1.0),
-            },
-        ];
-
-        let indices: [u32; 6] = [0, 1, 2, 0, 2, 3];
-
-        // Compile shaders
-        let vertex_shader_blob = ShaderBlob::compile(
-            include_bytes!("shaders/vertex_shader.hlsl"),
-            "vs_5_0",
-            "VSMain",
-        )?;
-        let pixel_shader_blob = ShaderBlob::compile(
-            include_bytes!("shaders/fragment_shader.hlsl"),
-            "ps_5_0",
-            "PSMain",
-        )?;
-
-        // Create shaders
-        let vertex_shader = VertexShader::create(device.as_mut(), vertex_shader_blob.clone())?;
-        let pixel_shader = PixelShader::create(device.as_mut(), pixel_shader_blob)?;
-        let mut shader_input_layout =
-            ShaderInputLayout::create(&device, &layout_desc, vertex_shader_blob)?;
-
-        let mut vertex_buffer = VertexBuffer::create_from_array(&device, &vertices)?;
-        let mut index_buffer =
-            IndexBuffer::create_from_array(&device, &indices, DXGI_FORMAT_R32_UINT)?;
-
         let viewport = Viewport::new(
             Vector2::new(screen_size.x as f32, screen_size.y as f32),
             Vector2::new(0.0, 1.0),
         );
         let mut blend_state = BlendState::alpha_blend_state(&device)?;
-
-        let mut linear_sampler = SamplerState::linear(&device)?;
-        let mut pixelate_sampler = SamplerState::pixelate(&device)?;
 
         rtv.bind(&ctx);
         viewport.bind(&ctx);
@@ -193,54 +105,24 @@ fn main() -> anyhow::Result<()> {
 
         let clear_color = [0.0f32, 0.0, 0.0, 0.0];
 
+        let mut item_render_ctx = ItemRenderContext::create(&device)?;
+
         loop {
             // Clear to red
             rtv.clear(&ctx, &clear_color);
 
+            // Prepare item rendering context
+            item_render_ctx.prepare_render(&ctx);
+
             for item in &mut items {
-                let elapsed_time = item.start_time.elapsed().as_millis() as f32;
+                // Update item data
+                item.update(&ctx)?;
 
-                // Update timing data
-                item.timing_data.replace(
-                    &ctx,
-                    &TimingDataBuffer {
-                        elapsed_time,
-                        _padding: [0.0, 0.0, 0.0],
-                    },
-                )?;
+                // Set current sampler for pixelation
+                item_render_ctx.set_sampler(&ctx, item.pixelate);
 
-                // Set shader resources
-                shader_input_layout.bind(&ctx);
-
-                // Set the vertex shader to current
-                vertex_shader.set_shader(&ctx);
-                pixel_shader.set_shader(&ctx);
-
-                // Set current sampler
-                if item.pixelate {
-                    pixelate_sampler.bind(&ctx);
-                } else {
-                    linear_sampler.bind(&ctx);
-                }
-
-                // Bind item data and timing data
-                let buffers = [
-                    item.item_data.buffer.as_ptr(),
-                    item.timing_data.buffer.as_ptr(),
-                ];
-                ctx.VSSetConstantBuffers(0, 2, buffers.as_ptr());
-
-                // Bind item texture
-                item.shader_resource_view.bind(&ctx);
-
-                // Bind vertex and index buffers
-                vertex_buffer.bind(&ctx);
-                index_buffer.bind(&ctx);
-
-                // Set drawing mode and draw from index buffer
-                ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-
-                ctx.DrawIndexed(6, 0, 0);
+                // Render item
+                item.render(&ctx);
             }
 
             sender.send_texture(rtv.texture.as_mut())?;

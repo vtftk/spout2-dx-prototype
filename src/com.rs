@@ -1,5 +1,5 @@
 use std::{
-    convert, fmt,
+    fmt,
     ops::{Deref, DerefMut},
     ptr,
 };

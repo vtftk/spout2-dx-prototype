@@ -52,7 +52,7 @@ impl ShaderBlob {
 
 pub struct PixelShader {
     pub blob: ShaderBlob,
-    pub shader: *mut ID3D11PixelShader,
+    pub shader: ComPtr<ID3D11PixelShader>,
 }
 
 impl PixelShader {
@@ -73,19 +73,22 @@ impl PixelShader {
             return Err(anyhow::anyhow!("failed to create vertex shader"));
         }
 
-        Ok(PixelShader { blob, shader })
+        Ok(PixelShader {
+            blob,
+            shader: shader.into(),
+        })
     }
 
-    pub fn set_shader(&self, ctx: &ID3D11DeviceContext) {
+    pub fn set_shader(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.PSSetShader(self.shader, std::ptr::null_mut(), 0);
+            ctx.PSSetShader(self.shader.as_mut(), std::ptr::null_mut(), 0);
         }
     }
 }
 
 pub struct VertexShader {
     pub blob: ShaderBlob,
-    pub shader: *mut ID3D11VertexShader,
+    pub shader: ComPtr<ID3D11VertexShader>,
 }
 
 impl VertexShader {
@@ -103,12 +106,15 @@ impl VertexShader {
 
         hr_bail!(hr, "failed to create vertex shader");
 
-        Ok(VertexShader { blob, shader })
+        Ok(VertexShader {
+            blob,
+            shader: shader.into(),
+        })
     }
 
-    pub fn set_shader(&self, ctx: &ID3D11DeviceContext) {
+    pub fn set_shader(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.VSSetShader(self.shader, std::ptr::null_mut(), 0);
+            ctx.VSSetShader(self.shader.as_mut(), std::ptr::null_mut(), 0);
         }
     }
 }
