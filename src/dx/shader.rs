@@ -114,7 +114,7 @@ impl VertexShader {
 
     pub fn set_shader(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.VSSetShader(self.shader.as_mut(), std::ptr::null_mut(), 0);
+            ctx.VSSetShader(self.shader.as_mut(), &std::ptr::null_mut(), 0);
         }
     }
 }
@@ -130,9 +130,7 @@ impl ShaderResourceView {
     ) -> anyhow::Result<ShaderResourceView> {
         let mut srv = std::ptr::null_mut();
         let hr = unsafe { device.CreateShaderResourceView(texture, std::ptr::null(), &mut srv) };
-
         hr_bail!(hr, "failed to create shader resource view");
-
         Ok(Self { view: srv.into() })
     }
 
@@ -183,7 +181,7 @@ impl ShaderInputLayout {
 
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.IASetInputLayout(self.layout.as_mut());
+            ctx.IASetInputLayout(self.layout.as_ptr());
         }
     }
 }

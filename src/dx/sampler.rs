@@ -65,6 +65,7 @@ impl SamplerState {
             ctx.PSSetSamplers(0, 1, &self.state.as_ptr());
         }
     }
+
     pub fn unbind(&self, ctx: &ID3D11DeviceContext) {
         unsafe {
             ctx.PSSetSamplers(0, 0, std::ptr::null());

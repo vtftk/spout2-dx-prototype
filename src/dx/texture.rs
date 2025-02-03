@@ -71,7 +71,7 @@ impl RenderTargetTexture {
 
     pub fn clear(&mut self, ctx: &ID3D11DeviceContext, color: &[f32; 4]) {
         unsafe {
-            ctx.ClearRenderTargetView(self.view.as_mut(), &color);
+            ctx.ClearRenderTargetView(self.view.as_ptr(), color);
         }
     }
 }
@@ -133,20 +133,15 @@ impl Texture {
         let img = image::open(path)?;
         let (width, height) = img.dimensions();
         let img = img.to_rgba8(); // Convert to RGBA8 format
-        let texture = Self::create_from_data(device, width, height, img.as_bytes())?;
-
-        Ok(Texture {
-            texture,
-            size: Vector2::new(width, height),
-        })
+        Self::create_from_data(device, width, height, img.as_bytes())
     }
 
-    fn create_from_data(
+    pub fn create_from_data(
         device: &ID3D11Device,
         width: u32,
         height: u32,
         data: &[u8],
-    ) -> anyhow::Result<ComPtr<ID3D11Texture2D>> {
+    ) -> anyhow::Result<Self> {
         let texture_desc = D3D11_TEXTURE2D_DESC {
             Width: width,
             Height: height,
@@ -172,6 +167,10 @@ impl Texture {
         let mut texture = std::ptr::null_mut();
         let hr = unsafe { device.CreateTexture2D(&texture_desc, &init_data, &mut texture) };
         hr_bail!(hr, "failed to create texture");
-        Ok(texture.into())
+
+        Ok(Texture {
+            texture: texture.into(),
+            size: Vector2::new(width, height),
+        })
     }
 }

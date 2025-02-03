@@ -68,6 +68,7 @@ static CLEAR_COLOR: [f32; 4] = [0.0, 0.0, 0.0, 0.0];
 pub fn setup_render_world(render_ctx: &mut RenderContext) {
     let ctx = &mut render_ctx.ctx;
     let world = &mut render_ctx.world;
+    let item_ctx = &mut render_ctx.item;
 
     // Bind the render texture
     render_ctx.rtv.bind(ctx);
@@ -77,6 +78,12 @@ pub fn setup_render_world(render_ctx: &mut RenderContext) {
 
     // Setup blending for layers
     world.blend_state.bind(ctx);
+
+    // Prepare for rendering items
+    item_ctx.prepare_render(ctx);
+
+    // Bind constant buffer for item rendering
+    item_ctx.bind_constants(ctx);
 }
 
 pub fn render(
@@ -88,12 +95,6 @@ pub fn render(
 
     // Clear background color
     render_ctx.rtv.clear(ctx, &CLEAR_COLOR);
-
-    // Prepare for rendering items
-    item_ctx.prepare_render(ctx);
-
-    // Bind constant buffer for item rendering
-    item_ctx.bind_constants(ctx);
 
     for item in items {
         // Update item data

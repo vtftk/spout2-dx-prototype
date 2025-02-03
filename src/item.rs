@@ -14,15 +14,17 @@ use winapi::{
     },
 };
 
-use crate::dx::{
-    buffer::{ConstantBuffer, IndexBuffer, VertexBuffer},
-    sampler::SamplerState,
-    shader::{PixelShader, ShaderBlob, ShaderInputLayout, ShaderResourceView, VertexShader},
-    texture::Texture,
+use crate::{
+    dx::{
+        buffer::{ConstantBuffer, IndexBuffer, VertexBuffer},
+        sampler::SamplerState,
+        shader::{PixelShader, ShaderBlob, ShaderInputLayout, ShaderResourceView, VertexShader},
+        texture::Texture,
+    },
+    texture_loader::TextureData,
 };
 
 /// Definition of an item to be thrown
-#[derive()]
 pub struct ItemDefinition {
     // Path to the throwable
     pub texture_path: PathBuf,
@@ -32,30 +34,19 @@ pub struct ItemDefinition {
     pub scale: f32,
 }
 
-impl ItemDefinition {
-    pub fn create_render_item(
-        self,
-        device: &ID3D11Device,
-        mut item_texture: Texture,
-        item_data: ItemDataBuffer,
-    ) -> anyhow::Result<RenderItemDefinition> {
-        let srv =
-            ShaderResourceView::create_from_texture(device, item_texture.texture.cast_as_mut())?;
-
-        Ok(RenderItemDefinition {
-            _texture: item_texture,
-            shader_resource_view: srv,
-            pixelate: self.pixelate,
-            start_time: Instant::now(),
-            item_data,
-        })
-    }
+/// Item definition queued to be spawned in the world
+pub struct QueuedItemDefinition {
+    /// Texture of the item to spawn
+    pub texture_data: TextureData,
+    // Whether to pixelate the texture when scaling during render
+    pub pixelate: bool,
+    /// Scale for the image
+    pub scale: f32,
 }
 
 /// Item definition that is ready to render
 pub struct RenderItemDefinition {
-    /// Reference to item texture (Maintained while the shader resource view is still around)
-    pub _texture: Texture,
+    pub texture: Texture,
 
     /// Shader resource view for the texture
     pub shader_resource_view: ShaderResourceView,
@@ -84,8 +75,6 @@ impl RenderItemDefinition {
         self.shader_resource_view.bind(ctx);
 
         unsafe {
-            // Set drawing mode and draw from index buffer
-            ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             ctx.DrawIndexed(6, 0, 0);
         }
     }
@@ -239,7 +228,7 @@ pub struct ItemRenderContext {
 
 impl ItemRenderContext {
     pub fn create(device: &ID3D11Device) -> anyhow::Result<Self> {
-        let item_shader = ItemShader::create(&device)?;
+        let item_shader = ItemShader::create(device)?;
         let index_buffer = create_item_index_buffer(device)?;
         let vertex_buffer = create_item_vertex_buffer(device)?;
 
@@ -271,8 +260,7 @@ impl ItemRenderContext {
     pub fn bind_constants(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
             // Bind item data and timing data
-            let buffers = [self.item_data.buffer.as_ptr()];
-            ctx.VSSetConstantBuffers(0, 1, buffers.as_ptr());
+            ctx.VSSetConstantBuffers(0, 1, &self.item_data.buffer.as_ptr());
         }
     }
 
@@ -285,6 +273,11 @@ impl ItemRenderContext {
         self.index_buffer.bind(ctx);
 
         self.bind_constants(ctx);
+
+        unsafe {
+            // Set drawing mode and draw from index buffer
+            ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+        }
     }
 
     pub fn set_sampler(&mut self, ctx: &ID3D11DeviceContext, pixelate: bool) {

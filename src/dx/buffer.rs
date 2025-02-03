@@ -69,43 +69,25 @@ where
     /// Replaces the constant buffer data with the new data
     pub fn replace(&mut self, ctx: &ID3D11DeviceContext, new_data: &T) -> anyhow::Result<()> {
         unsafe {
-            self.map(ctx, |data| {
-                // Copy the new data into the mapped buffer
-                std::ptr::copy_nonoverlapping(new_data, data.cast(), 1);
-            })
+            // Inside the loop where you update the constant buffer:
+            let mut mapped_resource = std::mem::zeroed();
+
+            let resource = self.buffer.cast_as_mut();
+
+            let hr = ctx.Map(
+                resource,
+                0,
+                D3D11_MAP_WRITE_DISCARD,
+                0,
+                &mut mapped_resource,
+            );
+            hr_bail!(hr, "failed to map constant buffer");
+
+            // Execute the action on the mapped data
+            std::ptr::copy_nonoverlapping(new_data, mapped_resource.pData.cast(), 1);
+
+            ctx.Unmap(resource, 0);
         }
-    }
-
-    pub fn bind(&mut self, ctx: &ID3D11DeviceContext, start_slot: UINT) {
-        unsafe {
-            ctx.VSSetConstantBuffers(start_slot, 1, &self.buffer.as_ptr());
-        }
-    }
-
-    /// Map the resource into memory and apply an action against it, un-maps the
-    /// resource after the action returns
-    pub unsafe fn map<F>(&mut self, ctx: &ID3D11DeviceContext, action: F) -> anyhow::Result<()>
-    where
-        F: FnOnce(*mut c_void),
-    {
-        // Inside the loop where you update the constant buffer:
-        let mut mapped_resource = std::mem::zeroed();
-
-        let resource = self.buffer.cast_as_mut();
-
-        let hr = ctx.Map(
-            resource,
-            0,
-            D3D11_MAP_WRITE_DISCARD,
-            0,
-            &mut mapped_resource,
-        );
-        hr_bail!(hr, "failed to map constant buffer");
-
-        // Execute the action on the mapped data
-        action(mapped_resource.pData);
-
-        ctx.Unmap(resource, 0);
 
         Ok(())
     }
@@ -140,12 +122,6 @@ impl IndexBuffer {
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
         unsafe {
             ctx.IASetIndexBuffer(self.buffer.as_ptr(), self.format, self.offset);
-        }
-    }
-
-    pub fn unbind(&mut self, ctx: &ID3D11DeviceContext) {
-        unsafe {
-            ctx.IASetIndexBuffer(std::ptr::null_mut(), DXGI_FORMAT_UNKNOWN, 0);
         }
     }
 
@@ -211,12 +187,6 @@ impl VertexBuffer {
         unsafe {
             let buffer = self.buffer.clone();
             ctx.IASetVertexBuffers(0, 1, &buffer.into(), &self.stride, &self.offset);
-        }
-    }
-
-    pub fn unbind(&self, ctx: &ID3D11DeviceContext) {
-        unsafe {
-            ctx.IASetVertexBuffers(0, 0, std::ptr::null(), &0, &0);
         }
     }
 
