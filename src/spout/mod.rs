@@ -1,10 +1,10 @@
 use autocxx::prelude::*;
 use ffi::{spoutDX, spoutDirectX, spoutSenderNames};
-use std::{ffi::CString, ops::Deref, pin::Pin};
-use windows::Win32::Graphics::Direct3D11::{ID3D11Device, ID3D11Texture2D};
-
-use crate::dx::leak_copy_com;
-// use all the main autocxx functions
+use std::{ffi::CString, pin::Pin};
+use winapi::{
+    shared::dxgiformat::DXGI_FORMAT,
+    um::d3d11::{ID3D11Device, ID3D11Texture2D},
+}; // use all the main autocxx functions
 
 include_cpp! {
     #include "Spout.h"
@@ -43,31 +43,34 @@ impl SpoutSender {
     pub fn set_sender_format(&mut self) -> anyhow::Result<()> {
         let library = self.handle.as_mut().unwrap();
 
-        spoutDX::SetSenderFormat(library, ffi::DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM);
-
-        Ok(())
-    }
-    pub fn open_directx11(&mut self, device: ID3D11Device) -> anyhow::Result<()> {
-        let library = self.handle.as_mut().unwrap();
-
         unsafe {
-            spoutDX::OpenDirectX11(library, std::mem::transmute(device));
+            spoutDX::SetSenderFormat(library, ffi::DXGI_FORMAT::DXGI_FORMAT_R8G8B8A8_UNORM);
         }
 
         Ok(())
     }
-
-    pub fn send_texture(&mut self, texture: &ID3D11Texture2D) -> anyhow::Result<()> {
+    pub fn open_directx11(&mut self, device: *mut ID3D11Device) -> anyhow::Result<()> {
         let library = self.handle.as_mut().unwrap();
 
-        let value = unsafe { spoutDX::SendTexture(library, std::mem::transmute(texture.clone())) };
+        unsafe {
+            spoutDX::OpenDirectX11(library, device.cast());
+        }
+
+        Ok(())
+    }
+    pub unsafe fn send_texture(&mut self, texture: *mut ID3D11Texture2D) -> anyhow::Result<()> {
+        let library = self.handle.as_mut().unwrap();
+
+        let value = spoutDX::SendTexture(library, texture.cast());
 
         Ok(())
     }
     pub fn hold_fps(&mut self, fps: c_int) -> anyhow::Result<()> {
         let library = self.handle.as_mut().unwrap();
 
-        spoutDX::HoldFps(library, fps);
+        unsafe {
+            spoutDX::HoldFps(library, fps);
+        }
 
         Ok(())
     }

@@ -1,37 +1,38 @@
-use anyhow::Context;
 use nalgebra::Vector2;
-use windows::Win32::{
-    Foundation::HMODULE,
-    Graphics::{
-        Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
-        Direct3D11::{
-            D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_SDK_VERSION, D3D11_VIEWPORT,
-        },
+use winapi::um::{
+    d3d11::{
+        D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, D3D11_SDK_VERSION, D3D11_VIEWPORT,
     },
+    d3dcommon::{D3D_DRIVER_TYPE_HARDWARE, D3D_FEATURE_LEVEL_11_0},
 };
 
-pub fn create_device_and_context() -> anyhow::Result<(ID3D11Device, ID3D11DeviceContext)> {
-    let mut device: Option<ID3D11Device> = None;
-    let mut context: Option<ID3D11DeviceContext> = None;
+use crate::{com::ComPtr, hr_bail};
 
-    unsafe {
+pub fn create_device_and_context(
+) -> anyhow::Result<(ComPtr<ID3D11Device>, ComPtr<ID3D11DeviceContext>)> {
+    let feature_level = D3D_FEATURE_LEVEL_11_0;
+
+    let mut device: *mut ID3D11Device = std::ptr::null_mut();
+    let mut context: *mut ID3D11DeviceContext = std::ptr::null_mut();
+
+    let hr = unsafe {
         D3D11CreateDevice(
-            None,
+            std::ptr::null_mut(),
             D3D_DRIVER_TYPE_HARDWARE,
-            HMODULE::default(),
-            Default::default(),
-            Some(&[D3D_FEATURE_LEVEL_11_0]),
+            std::ptr::null_mut(),
+            0,
+            &feature_level,
+            1,
             D3D11_SDK_VERSION,
-            Some(&mut device),
-            None,
-            Some(&mut context),
-        )?
+            &mut device,
+            std::ptr::null_mut(),
+            &mut context,
+        )
     };
 
-    let device = device.context("failed to create device")?;
-    let context = context.context("failed to create context")?;
+    hr_bail!(hr, "failed to create D3D11 device and context");
 
-    Ok((device, context))
+    Ok((device.into(), context.into()))
 }
 
 pub struct Viewport {
@@ -54,7 +55,7 @@ impl Viewport {
 
     pub fn bind(&self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.RSSetViewports(Some(&[self.inner.clone()]));
+            ctx.RSSetViewports(1, &self.inner);
         }
     }
 }

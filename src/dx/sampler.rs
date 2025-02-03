@@ -1,14 +1,14 @@
-use anyhow::Context;
-use windows::core::{Interface, InterfaceRef};
-use windows::Win32::Graphics::Direct3D11::{
+use winapi::um::d3d11::{
     ID3D11Device, ID3D11DeviceContext, ID3D11SamplerState, D3D11_COMPARISON_ALWAYS,
     D3D11_COMPARISON_NEVER, D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT,
     D3D11_FLOAT32_MAX, D3D11_SAMPLER_DESC, D3D11_TEXTURE_ADDRESS_WRAP,
 };
 
+use crate::{com::ComPtr, hr_bail};
+
 /// Texture sampler (Defines how textures are sampled and filtered)
 pub struct SamplerState {
-    state: ID3D11SamplerState,
+    state: ComPtr<ID3D11SamplerState>,
 }
 
 impl SamplerState {
@@ -26,11 +26,14 @@ impl SamplerState {
             MaxLOD: D3D11_FLOAT32_MAX,
         };
 
-        let mut state: Option<ID3D11SamplerState> = None;
-        unsafe { device.CreateSamplerState(&sampler_desc, Some(&mut state))? };
-        let state = state.context("failed to create linear sampler")?;
+        let mut state = std::ptr::null_mut();
+        let hr = unsafe { device.CreateSamplerState(&sampler_desc, &mut state) };
 
-        Ok(Self { state })
+        hr_bail!(hr, "failed to create linear sampler");
+
+        Ok(Self {
+            state: state.into(),
+        })
     }
 
     pub fn pixelate(device: &ID3D11Device) -> anyhow::Result<SamplerState> {
@@ -47,24 +50,24 @@ impl SamplerState {
             MaxLOD: D3D11_FLOAT32_MAX,
         };
 
-        let mut state: Option<ID3D11SamplerState> = None;
-        unsafe { device.CreateSamplerState(&sampler_desc, Some(&mut state))? };
-        let state = state.context("failed to create pixelate sampler")?;
+        let mut state = std::ptr::null_mut();
+        let hr = unsafe { device.CreateSamplerState(&sampler_desc, &mut state) };
 
-        Ok(Self { state })
+        hr_bail!(hr, "failed to create pixelate sampler");
+
+        Ok(Self {
+            state: state.into(),
+        })
     }
 
     pub fn bind(&mut self, ctx: &ID3D11DeviceContext) {
-        let sampler = self.state.clone();
-
         unsafe {
-            ctx.PSSetSamplers(0, Some(&[Some(sampler)]));
+            ctx.PSSetSamplers(0, 1, &self.state.as_ptr());
         }
     }
-
     pub fn unbind(&self, ctx: &ID3D11DeviceContext) {
         unsafe {
-            ctx.PSSetSamplers(0, None);
+            ctx.PSSetSamplers(0, 0, std::ptr::null());
         }
     }
 }
