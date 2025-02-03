@@ -28,6 +28,8 @@ pub struct ItemDefinition {
     pub texture_path: PathBuf,
     // Whether to pixelate the texture when scaling during render
     pub pixelate: bool,
+    /// Scale for the image
+    pub scale: f32,
 }
 
 impl ItemDefinition {
@@ -36,13 +38,9 @@ impl ItemDefinition {
         device: &ID3D11Device,
         mut item_texture: Texture,
         item_data: ItemDataBuffer,
-        timing_data: TimingDataBuffer,
     ) -> anyhow::Result<RenderItemDefinition> {
         let srv =
             ShaderResourceView::create_from_texture(device, item_texture.texture.cast_as_mut())?;
-
-        let item_data = ConstantBuffer::create(device, item_data)?;
-        let timing_data = ConstantBuffer::create(device, timing_data)?;
 
         Ok(RenderItemDefinition {
             _texture: item_texture,
@@ -50,7 +48,6 @@ impl ItemDefinition {
             pixelate: self.pixelate,
             start_time: Instant::now(),
             item_data,
-            timing_data,
         })
     }
 }
@@ -69,42 +66,20 @@ pub struct RenderItemDefinition {
     /// Instance the item was created at
     pub start_time: Instant,
 
-    pub item_data: ConstantBuffer<ItemDataBuffer>,
-    pub timing_data: ConstantBuffer<TimingDataBuffer>,
+    pub item_data: ItemDataBuffer,
 }
 
 impl RenderItemDefinition {
     /// Updates the timing data for this item
-    pub fn update(&mut self, ctx: &ID3D11DeviceContext) -> anyhow::Result<()> {
+    pub fn update(&mut self) -> anyhow::Result<()> {
         let elapsed_time = self.start_time.elapsed().as_millis() as f32;
 
-        // Update timing data
-        self.timing_data.replace(
-            ctx,
-            &TimingDataBuffer {
-                elapsed_time,
-                _padding: [0.0, 0.0, 0.0],
-            },
-        )?;
+        self.item_data.elapsed_time = elapsed_time;
 
         Ok(())
     }
 
-    /// Binds the constant buffers for this item
-    pub fn bind_constants(&mut self, ctx: &ID3D11DeviceContext) {
-        unsafe {
-            // Bind item data and timing data
-            let buffers = [
-                self.item_data.buffer.as_ptr(),
-                self.timing_data.buffer.as_ptr(),
-            ];
-            ctx.VSSetConstantBuffers(0, 2, buffers.as_ptr());
-        }
-    }
-
     pub fn render(&mut self, ctx: &ID3D11DeviceContext) {
-        self.bind_constants(ctx);
-
         // Bind item texture
         self.shader_resource_view.bind(ctx);
 
@@ -116,13 +91,8 @@ impl RenderItemDefinition {
     }
 }
 
-/// Buffer storing positional data for an item, this data
-/// is provided as a Constant Buffer to the shader and used
-/// to interpolate
-///
-/// Immutable between re-renders does not change
 #[derive(Debug, Default)]
-#[repr(C)]
+#[repr(C, align(16))]
 pub struct ItemDataBuffer {
     /// Normalized world size for the texture (texture_size / screen_size) scaled
     /// ahead of time for the current render target size
@@ -143,21 +113,8 @@ pub struct ItemDataBuffer {
     /// Duration the item should exist for
     pub duration: f32,
 
-    pub _padding: [f32; 3],
-}
-
-/// Buffer storing timing data for an item, updated frequently
-/// to update current time step between frames.
-///
-/// Updated on every frame using the latest time
-#[derive(Debug, Default)]
-#[repr(C)]
-pub struct TimingDataBuffer {
     /// Elapsed time since the item creation
     pub elapsed_time: f32,
-
-    /// Padding to reach 16 byte boundary
-    pub _padding: [f32; 3],
 }
 
 /// Creates a vertex buffer used to render items
@@ -277,6 +234,7 @@ pub struct ItemRenderContext {
     pub vertex_buffer: VertexBuffer,
     pub linear_sampler: SamplerState,
     pub pixelate_sampler: SamplerState,
+    pub item_data: ConstantBuffer<ItemDataBuffer>,
 }
 
 impl ItemRenderContext {
@@ -288,13 +246,34 @@ impl ItemRenderContext {
         let linear_sampler = SamplerState::linear(device)?;
         let pixelate_sampler = SamplerState::pixelate(device)?;
 
+        let item_data = ConstantBuffer::create_default(device)?;
+
         Ok(Self {
             item_shader,
             index_buffer,
             vertex_buffer,
             linear_sampler,
             pixelate_sampler,
+            item_data,
         })
+    }
+
+    pub fn set_current_data(
+        &mut self,
+        ctx: &ID3D11DeviceContext,
+        item_data: &ItemDataBuffer,
+    ) -> anyhow::Result<()> {
+        self.item_data.replace(ctx, item_data)?;
+        Ok(())
+    }
+
+    /// Binds the constant buffers for this item
+    pub fn bind_constants(&mut self, ctx: &ID3D11DeviceContext) {
+        unsafe {
+            // Bind item data and timing data
+            let buffers = [self.item_data.buffer.as_ptr()];
+            ctx.VSSetConstantBuffers(0, 1, buffers.as_ptr());
+        }
     }
 
     pub fn prepare_render(&mut self, ctx: &ID3D11DeviceContext) {
@@ -304,6 +283,8 @@ impl ItemRenderContext {
         // Bind vertex and index buffers
         self.vertex_buffer.bind(ctx);
         self.index_buffer.bind(ctx);
+
+        self.bind_constants(ctx);
     }
 
     pub fn set_sampler(&mut self, ctx: &ID3D11DeviceContext, pixelate: bool) {

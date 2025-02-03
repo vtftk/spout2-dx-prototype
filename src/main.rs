@@ -10,7 +10,6 @@ use dx::texture::Texture;
 use item::ItemDataBuffer;
 use item::ItemDefinition;
 use item::ItemRenderContext;
-use item::TimingDataBuffer;
 use nalgebra::Vector2;
 use spout::SpoutSender;
 use winapi::um::d3dcommon::*;
@@ -46,12 +45,14 @@ fn main() -> anyhow::Result<()> {
 
     let item_definitions = [
         ItemDefinition {
-            texture_path: "./assets/test1.png".into(),
-            pixelate: true,
+            texture_path: "./assets/test2.png".into(),
+            pixelate: false,
+            scale: 1.0,
         },
         ItemDefinition {
-            texture_path: "./assets/test2.png".into(),
+            texture_path: "./assets/test1.png".into(),
             pixelate: true,
+            scale: 5.0,
         },
     ];
 
@@ -60,11 +61,10 @@ fn main() -> anyhow::Result<()> {
     let screen_size_f32 = screen_size.cast::<f32>();
 
     let start_position = Vector2::new(0.0, 0.0);
-    let end_position = Vector2::new(1.0, 1.0);
+    let end_position = Vector2::new(0.5, 0.5);
 
     for definition in item_definitions {
         let item_texture = Texture::load_from_path(&device, &definition.texture_path)?;
-        let scale: f32 = 1.0;
         let spin_speed = 5000.0;
         let duration = 1000.0;
 
@@ -80,17 +80,12 @@ fn main() -> anyhow::Result<()> {
             start_position: to_screen_space(start_pos, &screen_size_f32),
             end_position: to_screen_space(end_pos, &screen_size_f32),
             spin_speed,
-            scale,
+            scale: definition.scale,
             duration,
-            _padding: [0.0, 0.0, 0.0],
-        };
-
-        let timing_data = TimingDataBuffer {
             elapsed_time: 0.0,
-            _padding: [0.0, 0.0, 0.0],
         };
 
-        let data = definition.create_render_item(&device, item_texture, item_data, timing_data)?;
+        let data = definition.create_render_item(&device, item_texture, item_data)?;
 
         items.push(data);
     }

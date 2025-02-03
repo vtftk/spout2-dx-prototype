@@ -92,9 +92,15 @@ pub fn render(
     // Prepare for rendering items
     item_ctx.prepare_render(ctx);
 
+    // Bind constant buffer for item rendering
+    item_ctx.bind_constants(ctx);
+
     for item in items {
         // Update item data
-        item.update(ctx)?;
+        item.update()?;
+
+        // Update the constant buffer using the current data
+        item_ctx.set_current_data(ctx, &item.item_data)?;
 
         // Set current sampler for pixelation
         item_ctx.set_sampler(ctx, item.pixelate);

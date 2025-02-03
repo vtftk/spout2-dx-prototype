@@ -1,4 +1,3 @@
-// Constant buffer for the initial item data (Immutable)
 cbuffer ItemDataBuffer : register (b0) {
     float2 tx_size; 
     float2 start_pos;
@@ -6,10 +5,6 @@ cbuffer ItemDataBuffer : register (b0) {
     float spin_speed;
     float scale;
     float duration;
-}
-
-// Constant buffer for the timing data (Dynamic)
-cbuffer TimingDataBuffer : register (b1) {
     float elapsed_time;
 }
 

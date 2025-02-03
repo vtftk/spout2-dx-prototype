@@ -7,6 +7,7 @@ use winapi::{
         basetsd::UINT8,
         dxgiformat::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM},
         dxgitype::DXGI_SAMPLE_DESC,
+        minwindef::{FALSE, TRUE},
     },
     um::d3d11::{
         ID3D11BlendState, ID3D11Device, ID3D11DeviceContext, ID3D11RenderTargetView,
@@ -68,12 +69,6 @@ impl RenderTargetTexture {
         }
     }
 
-    pub fn unbind(&mut self, ctx: &ID3D11DeviceContext) {
-        unsafe {
-            ctx.OMSetRenderTargets(1, std::ptr::null(), std::ptr::null_mut());
-        }
-    }
-
     pub fn clear(&mut self, ctx: &ID3D11DeviceContext, color: &[f32; 4]) {
         unsafe {
             ctx.ClearRenderTargetView(self.view.as_mut(), &color);
@@ -89,10 +84,10 @@ impl BlendState {
     /// Blend state that blends alpha layers
     pub fn alpha_blend_state(device: &ID3D11Device) -> anyhow::Result<BlendState> {
         let blend_desc = D3D11_BLEND_DESC {
-            AlphaToCoverageEnable: 0,
-            IndependentBlendEnable: 0,
+            AlphaToCoverageEnable: FALSE,
+            IndependentBlendEnable: FALSE,
             RenderTarget: [D3D11_RENDER_TARGET_BLEND_DESC {
-                BlendEnable: 1,
+                BlendEnable: TRUE,
                 SrcBlend: D3D11_BLEND_SRC_ALPHA,
                 DestBlend: D3D11_BLEND_INV_SRC_ALPHA,
                 BlendOp: D3D11_BLEND_OP_ADD,
