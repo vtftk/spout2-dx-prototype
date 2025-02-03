@@ -164,29 +164,29 @@ pub struct TimingDataBuffer {
 pub fn create_item_vertex_buffer(device: &ID3D11Device) -> anyhow::Result<VertexBuffer> {
     #[repr(C)]
     struct Vertex {
-        pos: Vector3<f32>,
+        pos: Vector2<f32>,
         tex: Vector2<f32>,
     }
 
     let vertices = [
         // Top-left
         Vertex {
-            pos: Vector3::new(-0.5, -0.5, 0.0),
+            pos: Vector2::new(-0.5, -0.5),
             tex: Vector2::new(0.0, 1.0),
         },
         // Bottom-left
         Vertex {
-            pos: Vector3::new(-0.5, 0.5, 0.0),
+            pos: Vector2::new(-0.5, 0.5),
             tex: Vector2::new(0.0, 0.0),
         },
         // Bottom-right
         Vertex {
-            pos: Vector3::new(0.5, 0.5, 0.0),
+            pos: Vector2::new(0.5, 0.5),
             tex: Vector2::new(1.0, 0.0),
         },
         // Top-right
         Vertex {
-            pos: Vector3::new(0.5, -0.5, 0.0),
+            pos: Vector2::new(0.5, -0.5),
             tex: Vector2::new(1.0, 1.0),
         },
     ];
@@ -235,7 +235,7 @@ impl ItemShader {
                 D3D11_INPUT_ELEMENT_DESC {
                     SemanticName: "POSITION\0".as_ptr() as _,
                     SemanticIndex: 0,
-                    Format: DXGI_FORMAT_R32G32B32_FLOAT,
+                    Format: DXGI_FORMAT_R32G32_FLOAT,
                     InputSlot: 0,
                     AlignedByteOffset: 0,
                     InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
@@ -246,7 +246,7 @@ impl ItemShader {
                     SemanticIndex: 0,
                     Format: DXGI_FORMAT_R32G32_FLOAT,
                     InputSlot: 0,
-                    AlignedByteOffset: 12,
+                    AlignedByteOffset: 8,
                     InputSlotClass: D3D11_INPUT_PER_VERTEX_DATA,
                     InstanceDataStepRate: 0,
                 },

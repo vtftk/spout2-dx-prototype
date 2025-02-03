@@ -14,7 +14,7 @@ cbuffer TimingDataBuffer : register (b1) {
 }
 
 struct VS_IN {
-    float3 pos : POSITION;
+    float2 pos : POSITION;
     float2 tex : TEXCOORD;
 };
 
@@ -61,7 +61,7 @@ PS_IN VSMain(VS_IN input) {
     float item_time = clamp(elapsed_time / duration, 0.0f, 1.0f);
     float yaw = YawInterpolation(spin_speed, elapsed_time);
 
-    float2 inputPosition = input.pos.xy;
+    float2 inputPosition = input.pos;
 
     // Apply yaw rotation to the input position
     float2 rotatedInputPosition = ApplyYaw(inputPosition, yaw);
