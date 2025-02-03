@@ -58,10 +58,12 @@ impl SpoutSender {
 
         Ok(())
     }
-    pub unsafe fn send_texture(&mut self, texture: *mut ID3D11Texture2D) -> anyhow::Result<()> {
+    pub fn send_texture(&mut self, texture: *mut ID3D11Texture2D) -> anyhow::Result<()> {
         let library = self.handle.as_mut().unwrap();
 
-        let value = spoutDX::SendTexture(library, texture.cast());
+        let value = unsafe {
+            spoutDX::SendTexture(library, texture.cast());
+        };
 
         Ok(())
     }
